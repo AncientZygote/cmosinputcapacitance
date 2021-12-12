@@ -1,0 +1,285 @@
+REVISED CBCM MEAS DISCRETE C WITH INVERTER PAIR
+
+* test a discrete capacitor with CBCM method
+* two inverter CBCM charge-based capacitance measurement setup
+* the 2nd inverter is the test vehicle which charges load C
+
+* see  
+* Analytical Modeling and Characterization 
+* of Deep-Submicrometer Interconnect
+* by Dennis Sylvester and Chenming Hu, PROCEEDINGS OF THE IEEE,
+* VOL. 89, NO. 5, MAY 2001
+
+* In this version, we implement Ngspice control structures
+* to strip the negative current on pmos turn-off (our mohawk)
+* otherwise known in the literature as negative return current
+* This mohawk introduced error ~7% in the original CBCM method
+
+* using Ngspice-27 Creation Date: Tue Dec 26 17:10:20 UTC 2017
+* using BSIM4 level=54 mosfet models from  process file
+* /FreePDK45/ncsu_basekit/models/hspice
+* /tran_models/models_nom/NMOS_VTL.inc
+* in which we updated the version statement from 4.0 to 4.8
+* and enabled RF high speed support
+
+* the W and L dimensions of INV_X1 
+* come from NCSU FreePDK 45nm
+* used by Christopher Torng 2019 for 
+* a 45nm ASIC design kit for mflowgen
+* we use ngspice 25 degree C default circuit temperature, 
+* and vdd 1.10v per
+* NangateOpenCellLibrary_typical 
+* Build Date: Thursday Feb 17 15:07 2011 library
+
+
+*********************************
+* PARAMETERS for command lines, 
+* CSPARAMETERS for lines within control section or echos/prints
+* refer to ngspice-27 manual for syntax
+
+* Simulation time setup
+* desired pulse train frequency in Hz
+.param testfreq=1000e6
+* printable as MHz
+.csparam testfreqPrintable={testfreq/1e6}
+* the period is then 1/frequency in seconds
+.param testperiod='1/testfreq'
+.csparam testperiodctl={testperiod}
+*.csparam testperiodSmallerForPlotctl={testperiod*0.7}
+.csparam testperiodSmallerForPlotctl={testperiod*1.1}
+* how many cycles at specified frequency should be analyzed
+.param testcycles='5'
+* length of the simulation in seconds will be 
+* number of cycles times period
+.param ttime='testperiod*testcycles'
+.csparam ttimectl={ttime}
+* how many simulation steps desired:
+.param numberOfStepsInSim=100000
+* resolution is length of simulation divided by steps
+.param transstepsize='ttime/numberOfStepsInSim'
+
+* power supply DC voltage, using 
+* Nangate typical corner Vdd=1.10 v, see 
+* NangateOpenCellLibrary_typical Build Date: Thursday Feb 17 15:07 2011
+.param DCsupplyVoltage=1.10
+* want to space multiple voltage plots clearly, 
+* so get ceiling of DCsupplyVoltage
+.param PlotMultiVoltsSpacer=(DCsupplyVoltage+.9)
+* need a csparam form to use in the control section
+.csparam PlotMultiVoltsSpacerForCTL={PlotMultiVoltsSpacer}
+* similarly, need DCsupplyVoltage param that works in control section
+.csparam DCsupplyVoltageForCTL={DCsupplyVoltage}
+* for y limit if plot n traces together, say n=4
+.param numOfVoltTraces=4
+.csparam DCsupplyVoltageForYLIM={PlotMultiVoltsSpacer*numOfVoltTraces}
+
+* two-phase pulse train input stimulus parameters
+* note rise/fall based on 20% of PMOS pulse width
+.param RiseFallPercent=0.20
+.param HalfPeriod='(testperiod/2)'
+*.param PulseWpmos='(HalfPeriod)-(HalfPeriod*2*RiseFallPercent)'
+.param PulseWpmos='(HalfPeriod)'
+.param TdelayBeginNMOS='(HalfPeriod*RiseFallPercent*1.1)'
+*.param PulseWnmos='(HalfPeriod)-(HalfPeriod*4*RiseFallPercent)'
+.param PulseWnmos='(HalfPeriod)-(HalfPeriod*2.2*RiseFallPercent)'
+.param TriseOrFall='(PulseWpmos*RiseFallPercent)'
+.csparam TriseOrFallPrintable={TriseOrFall*1}
+
+* test capacitance to be measured (if make changes below)
+.param TestCapacitance=1.5fF
+.csparam TestCapacitancePrintable={TestCapacitance*1e15}
+
+**************************************
+* BSIM4 level=54 mosfet models from 
+* 2006 45nm_bulk.pm process file
+* which we updated the version statement from 4.0 to 4.8
+
+.include modelcard.nmos
+.include modelcard.pmos
+
+* use NMOS_VTL for the model name nmos in instantiation
+* use PMOS_VTL for the model name pmos in instantiation
+**************************************
+* MANDATORY SEPARATE POWER SUPPLIES for all circuits
+
+* inverter 1 power supply:
+vdd1 dd1 0 {DCsupplyVoltage}
+vss1 ss1 0 dc 0
+ve1  sub1  0 dc 0
+vpe1 well1 0 {DCsupplyVoltage}
+
+* inverter 2 power supply:
+vdd2 dd2 0 {DCsupplyVoltage}
+vss2 ss2 0 dc 0
+ve2  sub2  0 dc 0
+vpe2 well2 0 {DCsupplyVoltage}
+
+********************************************
+* INVERTER SUBCIRCUIT definition
+
+* Reminder: nd ng ns nb is the usual MOSFET lead order
+
+* drive the PMOS gate separately from the NMOS
+* one input each of PUN and PDN transistors of the inverter
+
+.subckt inverter dd ss sub well inp inn out
+
+mn1  out inn  ss  sub  NMOS_VTL W=0.415000U L=0.050000U  
+
+mp1  out inp  dd  well  PMOS_VTL W=0.630000U L=0.050000U 
+
+* used W and L dimensions of INV_X1 from NCSU FreePDK 45nm
+* see Christopher Torng 2019 45nm ASIC design kit for mflowgen
+
+.ends inverter
+
+**********************************************
+
+*********************************************
+* INSTANTIATE 2 INVERTERS
+
+* make 2 inverter instances using the subckt inverter above
+
+* instantiate reference inverter (no load) inverter 1:
+* dd ss sub well in out
+X1 dd1  ss1  sub1  well1 inPMOS inNMOS out1 inverter
+
+* instantiate test inverter 2 (load with target capacitance):
+* dd ss sub well in out
+X2 dd2  ss2  sub2  well2 inPMOS inNMOS out2 inverter
+
+********************************************
+
+*********************************************
+* MEASUREMENT CONNECTIONS
+
+* measure test capacitor of specified value TestCapacitance
+* driven by test inverter X2 out2
+
+* hang a test cap off the output of the 2nd inverter
+CTEST2 out2 0 {TestCapacitance}
+
+********************************************
+* CONTROL SECTION
+
+.control
+
+* syntax note: initial plus sign is extension of previous line
+* to keep columns less than equal 66 for printing
+
+* can save NMOS PMOS transistor internal model vectors
+* if desired, see ngspice-27 manual chap 31, 
+* section 31.6.9 BSIM4
+* for example:
+* save all  @m.x1.mp1[id] @m.x2.mp1[id] 
+*+@m.x1.mp1[ibs] @m.x2.mp1[ibs] @m.x1.mp1[ibd] @m.x2.mp1[ibd]
+*+ @m.x1.mp1[isub] @m.x2.mp1[isub] @m.x1.mp1[igs] @m.x2.mp1[igs]
+
+* run transient analysis defined outside control section
+ run
+* make plot white background instead of default black
+ set color0 = white ; plot window -background color
+ set color1 = black ; plot window -grid and text color
+* thinner grid and plot lines?
+ set xbrushwidth=0.5
+
+* show "the old in out" (Clockwork Orange, Roddy McDowell line)
+plot inPMOS 
++ inNMOS+$&PlotMultiVoltsSpacerForCTL 
++ out1+($&PlotMultiVoltsSpacerForCTL*2) 
++ out2+($&PlotMultiVoltsSpacerForCTL*3) 
++ xl 0 $&testperiodSmallerForPlotctl
++ yl 0 $&DCsupplyVoltageForYLIM 
++ title "CBCM meas. calibration cap, mohawk stripped"
+
+****
+* BEGIN SHAVE THE MOHAWK
+* strip the asymmetrical negative return 
+*currents on pmos turn-off
+
+* get length of vectors to process in loop
+let samplelen=length(vdd1#branch)
+
+* create copy of current vectors vdd1#branch, 
+* vdd2#branch to clean of negative return currents
+let vd1brclean = vdd1#branch
+let vd2brclean = vdd2#branch
+
+* loop through the new current vectors and 
+* strip any positive current
+* remembering that ngspice views negative return current
+* to power supply as positive
+
+* init loop counter and vector index
+let loop = 0
+
+* while loop counter is less than the length of
+*  the current vectors (begin with index 0)
+* check for a positive current value and replace
+* it with zero as not relevant to charging C
+
+  while loop < samplelen
+    if vd1brclean[loop] > 0
+      let vd1brclean[loop] = 0
+    end
+
+    if vd2brclean[loop] > 0
+      let vd2brclean[loop] = 0
+    end
+
+    let loop = loop + 1
+  end
+* END SHAVE MOHAWK
+****
+
+* measure avg vdd current in each inverter
+* from t=0 to end of simulation
+* using the clean current vectors we made above:
+
+ meas tran inv1rmsCur AVG vd1brclean from=0 to=$&ttimectl
+ meas tran inv2rmsCur AVG vd2brclean from=0 to=$&ttimectl
+
+* use difference of two average inverter currents 
+* in vdd leads to measure capacitance load on one;
+* formally, 
+* C=(input_period*abs(avg_inv1_current-avg_inv2_current)/Vdd
+ let capmeasured= $&testperiodctl * abs(inv2rmsCur-inv1rmsCur)/
++               $&DCsupplyVoltageForCTL
+ print capmeasured
+
+ echo "(injection current or mohawk stripped prior)"
+
+ echo "Actual test capacitance on 2nd inverter was "
+ echo $&TestCapacitancePrintable " fF"
+
+ echo "Test frequency was " $&testfreqPrintable " MHz"
+ echo "Input rise/fall time was " $&TriseOrFallPrintable " s"
+ echo "Vdd supply voltage was " 
+ echo $&DCsupplyVoltageForCTL " volts DC"
+
+.endc
+*********************************************
+
+*********************************************
+* INVERTER PULSE INPUTS
+
+* pulse both inverters' PMOS gates with VDD voltage
+
+VIN1 inPMOS 0 PULSE(0 {DCsupplyVoltage} 
++ 0 {TriseOrFall} {TriseOrFall} {PulseWpmos} {testperiod})
+
+* pulse both inverters' NMOS input with VDD, but--
+* want NMOS off while PMOS turns on or off, so gets
+* delayed and smaller pulse width PulseWnmos
+
+VIN2 inNMOS 0 PULSE(0 {DCsupplyVoltage} {TdelayBeginNMOS}
++ {TriseOrFall} {TriseOrFall} {PulseWnmos}
++ {testperiod})
+
+*******************************************
+* transient analysis
+.tran 'transstepsize' 'ttime'
+
+********************************************
+.END
+

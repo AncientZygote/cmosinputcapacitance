@@ -1,0 +1,218 @@
+SIMPLE CAPACITANCE MEAS OF NAND INPUT CAP
+
+* a less sophisticated simple input capacitance
+* driving gate with voltage pulse
+* and calculating charge delivered
+
+* meas capacitance of NAND2_X1 gate input 1
+
+
+* using Ngspice-27 Creation Date: Tue Dec 26 17:10:20 UTC 2017
+* using BSIM4 level=54 mosfet models from  process file
+* /FreePDK45/ncsu_basekit/models/hspice
+* /tran_models/models_nom/NMOS_VTL.inc
+* in which we updated the version statement from 4.0 to 4.8
+* and enabled RF high speed support
+
+* the W and L dimensions of INV_X1 and NAND2_X1 
+* come from NCSU FreePDK 45nm
+* used by Christopher Torng 2019 for 
+* a 45nm ASIC design kit for mflowgen
+* we use ngspice 25 degree C default circuit temperature, 
+* and vdd 1.10v per
+* NangateOpenCellLibrary_typical 
+* Build Date: Thursday Feb 17 15:07 2011 library
+
+*********************************
+* PARAMETERS for command lines, 
+* CSPARAMETERS for lines within control section or echos/prints
+* refer to ngspice-27 manual for syntax
+
+* Simulation time setup
+* desired pulse train frequency in Hz
+.param testfreq=1000e6
+* printable as MHz
+.csparam testfreqPrintable={testfreq/1e6}
+* the period is then 1/frequency in seconds
+.param testperiod='1/testfreq'
+.csparam testperiodctl={testperiod}
+.csparam testperiodctl2={testperiod*2}
+*.csparam testperiodSmallerForPlotctl={testperiod*0.7}
+.csparam testperiodSmallerForPlotctl={testperiod*1.1}
+* how many cycles at specified frequency should be analyzed
+.param testcycles='5'
+* length of the simulation in seconds will be 
+* number of cycles times period
+.param ttime='testperiod*testcycles'
+.csparam ttimectl={ttime}
+* how many simulation steps desired:
+.param numberOfStepsInSim=100000
+* resolution is length of simulation divided by steps
+.param transstepsize='ttime/numberOfStepsInSim'
+
+* power supply DC voltage, using 
+* Nangate typical corner Vdd=1.10 v, see 
+* NangateOpenCellLibrary_typical Build Date: 
+* Thursday Feb 17 15:07 2011
+.param DCsupplyVoltage=1.10
+* want to space multiple voltage plots clearly, 
+* so get ceiling of DCsupplyVoltage
+.param PlotMultiVoltsSpacer=(DCsupplyVoltage+.9)
+* need a csparam form to use in the control section
+.csparam PlotMultiVoltsSpacerForCTL={PlotMultiVoltsSpacer}
+* similarly, need DCsupplyVoltage param that works in control section
+.csparam DCsupplyVoltageForCTL={DCsupplyVoltage}
+* for y limit if plot n traces together, say n=5
+.param numOfVoltTraces=5
+.csparam DCsupplyVoltageForYLIM={PlotMultiVoltsSpacer*numOfVoltTraces}
+
+* pulse train input stimulus parameters
+
+* note rise/fall based on 20% pulse width
+.param RiseFallPercent=0.20
+.param HalfPeriod='(testperiod/2)'
+.param PulseWidth='(HalfPeriod)'
+
+.param TriseOrFall='(PulseWidth*RiseFallPercent)'
+.csparam TriseOrFallPrintable={TriseOrFall*1}
+
+* load capacitance for NAND output
+.param NANDLoadCapacitance=59fF
+.csparam NANDLoadCapacitancePrintable={NANDLoadCapacitance*1e15}
+
+**************************************
+* BSIM4 level=54 mosfet models from 
+* 2006 45nm_bulk.pm process file
+* which we updated the version statement from 4.0 to 4.8
+
+.include modelcard.nmos
+.include modelcard.pmos
+
+* use NMOS_VTL for the model name nmos in instantiation
+* use PMOS_VTL for the model name pmos in instantiation
+**************************************
+* POWER SUPPLY
+
+* NAND gate power supply:
+vdd3 vddnand 0 {DCsupplyVoltage}
+* the NAND subckt simply uses global gnd node 0
+
+*********************************************
+
+* CREATE the NAND gate whose input gate A will be
+* target capacitance 
+
+*** SUBCIRCUIT DEFINITION
+* global gnd 0 not included in parameter list
+.SUBCKT NAND in1 in2 out VDD
+* 
+* PMOS parallel PUN pair
+*  nd  ng  ns  nb  model
+M3 out in1 vdd vdd PMOS_VTL W=0.630000U L=0.050000U 
+M4 out in2 vdd vdd PMOS_VTL W=0.630000U L=0.050000U 
+
+* NMOS series PDN pair
+*   nd   ng  ns    nb model
+M1 net.1 in2 0     0  NMOS_VTL W=0.415000U L=0.050000U 
+M2 out   in1 net.1 0  NMOS_VTL W=0.415000U L=0.050000U 
+*
+.ENDS NAND
+* above we use the W and L dimensions of NAND2_X1
+* from NCSU FreePDK 45nm
+* from Christopher Torng 2019 45nm ASIC design kit for mflowgen
+*
+
+* INSTANTIATE a NAND gate X3 using the SUBCKT:
+*  in1 in2  out  VDD
+X3 in1 in2  out  vddnand NAND
+
+********************************************
+
+*********************************************
+* MEASUREMENT CONNECTIONS
+
+* measure effective capacitance of the in1 input to NAND gate
+* when driven voltage pulse train
+
+* provide low resistance path
+* to NAND input 1 in1 from pulse
+* source, use approx. CMOS output R
+* as voltage pulse source resistance
+RTOTARGETC PulseInput in1 1000
+
+* tie unused NAND input in2 of NAND to vddnand
+RX32 in2 vddnand 10k
+
+* LOAD the NAND X3 output:
+CLOAD out 0 {NANDLoadCapacitance}
+
+********************************************
+* CONTROL SECTION
+
+.control
+
+* syntax note: initial plus sign is extension of previous line
+* to keep columns less than equal 66 for printing
+
+* run transient analysis defined outside the control section
+ run
+* make the plot white background instead of default black
+ set color0 = white ; plot window -background color
+ set color1 = black ; plot window -grid and text color
+* thinner grid and plot lines?
+ set xbrushwidth=0.5
+
+* plot 2 cycles NAND output and in1 NAND input 
+plot in1 out xl 0 $&testperiodctl2
++ title "NAND input (in1, in2 at VDD) and output, 2 cycles"
+
+* measure input capacitance of the NAND:
+ let rcurrent = ( (pulseinput - in1) / @rtotargetc[resistance] )
+ echo "charge transferred to NAND input: (Coulombs)"
+ meas tran incurlh INTEG rcurrent from=0 to=$&TriseOrFallPrintable
+ echo "voltage change on NAND input: (Volts)"
+ meas tran maxin1 MAX in1 from=0 to=$&TriseOrFallPrintable
+ echo ""
+ echo "capacitance of NAND input measured, fF:"
+ let NANDincap = (incurlh / maxin1)*1e15
+ print NANDincap
+ echo ""
+
+ settype current rcurrent
+ plot rcurrent xl 0 $&TriseOrFallPrintable
++ title "NAND in1 current L to H"
+ plot in1 xl 0 $&TriseOrFallPrintable 
++ title "NAND in1 gate voltage L to H"
+
+****
+ echo "(Nangate typical build library suggests"
+ echo "NAND2_X1 A1 input is 1.599 fF)"
+
+ echo ""
+ echo "Load capacitance on NAND output:  " 
+ echo $&NANDLoadCapacitancePrintable " fF"
+
+ echo ""
+ echo "Test frequency was " $&testfreqPrintable " MHz"
+ echo "Input rise/fall time was " $&TriseOrFallPrintable " s"
+ echo "pulse source output impedance: (ohms)"
+ print @RTOTARGETC[resistance]
+ echo "Vdd supply voltage was "
+ echo $&DCsupplyVoltageForCTL " volts DC"
+
+.endc
+*********************************************
+
+*********************************************
+* PULSE DRIVE of NAND input 1
+
+VIN1 PulseInput 0 PULSE(0 {DCsupplyVoltage} 
++ 0 {TriseOrFall} {TriseOrFall} {PulseWidth} {testperiod})
+
+*******************************************
+* transient analysis
+.tran 'transstepsize' 'ttime'
+
+********************************************
+.END
+
